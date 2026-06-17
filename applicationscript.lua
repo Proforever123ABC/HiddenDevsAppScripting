@@ -1,10 +1,13 @@
---// Roblox Core Services
+-- Discord: bhalla123abc
+-- Roblox: proforever123abc
+
+-- Roblox Core Services
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
 local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
 
---// Constants and Player References
+-- Constants and Player References
 local LOCAL_PLAYER = Players.LocalPlayer
 local CAMERA = workspace.CurrentCamera
 
@@ -13,7 +16,7 @@ local COLOR_SELECTED = Color3.fromRGB(0, 255, 0)    -- Green when selected
 local COLOR_HOVERED = Color3.fromRGB(255, 255, 0)   -- Yellow when hovered
 local COLOR_DEFAULT = Color3.fromRGB(200, 200, 200) -- Neutral grey
 
---// EditableObject class with metatable
+-- EditableObject class with metatable
 -- Encapsulates a part and provides transformation methods
 local EditableObject = {}
 EditableObject.__index = EditableObject
@@ -64,7 +67,7 @@ function EditableObject:highlight(color)
 	self.instance.Color = color
 end
 
---// Module-level State
+-- Module-level State
 
 local allObjects = {}          -- Stores all created EditableObjects
 local hoveredObject = nil      -- Object currently under the mouse cursor
@@ -75,7 +78,7 @@ local gridSnapEnabled = false  -- Whether to snap movements to integer grid
 local infoBillboard = nil      -- BillboardGui displaying selected object info
 local objectCounter = 0        -- Unique ID counter for naming objects
 
---// Utility Functions
+-- Utility Functions
 
 -- Round vector components to nearest integer if grid snap is enabled
 local function snapVector(vector)
@@ -374,7 +377,7 @@ local function handleKeyInput(key)
 	end
 end
 
---// Event Connections
+-- Event Connections
 
 -- Listen to user keyboard input
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
@@ -387,7 +390,7 @@ end)
 -- Update hovered object every frame to give real-time feedback
 RunService.RenderStepped:Connect(updateHover)
 
---// Print control instructions on script load for user clarity
+-- Print control instructions on script load for user clarity
 print([[
 EditableObject Controls:
   F       - Create new object in front of player
