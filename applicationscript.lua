@@ -9,7 +9,6 @@ local RunService = game:GetService("RunService")
 
 -- Constants and Player References
 local LOCAL_PLAYER = Players.LocalPlayer
-local CAMERA = workspace.CurrentCamera
 
 -- Colors for visual feedback on parts
 local COLOR_SELECTED = Color3.fromRGB(0, 255, 0)    -- Green when selected
@@ -77,8 +76,35 @@ local redoStack = {}           -- Stores states for Redo
 local gridSnapEnabled = false  -- Whether to snap movements to integer grid
 local infoBillboard = nil      -- BillboardGui displaying selected object info
 local objectCounter = 0        -- Unique ID counter for naming objects
+local objectsFolder = nil      -- Folder container that owns all spawned parts
+
+-- Current camera, kept up to date in case it ever gets replaced
+local currentCamera = workspace.CurrentCamera
+workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(function()
+	currentCamera = workspace.CurrentCamera
+end)
 
 -- Utility Functions
+
+-- Finds or creates the Folder that holds all spawned objects,
+-- so parts don't get dropped loose into workspace
+local function getObjectsFolder()
+	if objectsFolder and objectsFolder.Parent then
+		return objectsFolder
+	end
+
+	local existing = workspace:FindFirstChild("EditableObjects")
+	if existing then
+		objectsFolder = existing
+	else
+		local folder = Instance.new("Folder")
+		folder.Name = "EditableObjects"
+		folder.Parent = workspace
+		objectsFolder = folder
+	end
+
+	return objectsFolder
+end
 
 -- Round vector components to nearest integer if grid snap is enabled
 local function snapVector(vector)
@@ -146,21 +172,21 @@ local function createObject(position)
 	local part = Instance.new("Part")
 	part.Size = Vector3.new(4, 4, 4)
 	part.Anchored = true
-	part.TopSurface = Enum.SurfaceType.Smooth
-	part.BottomSurface = Enum.SurfaceType.Smooth
 	part.Color = COLOR_DEFAULT
 
 	-- Position the part either at given position or above player
+	local spawnCFrame
 	if position then
-		part.Position = position
+		spawnCFrame = CFrame.new(position)
 	else
 		local character = LOCAL_PLAYER.Character
 		local basePos = character and character:GetPivot().Position or Vector3.new(0, 5, 0)
-		part.Position = basePos + Vector3.new(0, 5, 0)
+		spawnCFrame = CFrame.new(basePos + Vector3.new(0, 5, 0))
 	end
+	part.CFrame = spawnCFrame
 
 	assignUniqueName(part)
-	part.Parent = workspace
+	part.Parent = getObjectsFolder()
 
 	local obj = EditableObject.new(part)
 	table.insert(allObjects, obj)
@@ -234,7 +260,7 @@ local function duplicateSelectedObject()
 	local clonePart = selectedObject.instance:Clone()
 	clonePart.CFrame = clonePart.CFrame * CFrame.new(2, 0, 2) -- Offset to avoid overlap
 	assignUniqueName(clonePart)
-	clonePart.Parent = workspace
+	clonePart.Parent = getObjectsFolder()
 
 	local cloneObj = EditableObject.new(clonePart)
 	table.insert(allObjects, cloneObj)
@@ -243,15 +269,19 @@ local function duplicateSelectedObject()
 end
 
 -- Detects which EditableObject the mouse is currently over and manages hover state
-local function updateHover()
-	-- Get mouse position in 2D screen space
-	local mouseLocation = UserInputService:GetMouseLocation()
-	local ray = CAMERA:ViewportPointToRay(mouseLocation.X, mouseLocation.Y)
+local lastMouseLocation = nil
+local lastCameraCFrame = nil
 
-	-- Cast ray into world to find part under cursor
+local function refreshHover()
+	if not currentCamera then return end
+
+	local mouseLocation = UserInputService:GetMouseLocation()
+	local ray = currentCamera:ViewportPointToRay(mouseLocation.X, mouseLocation.Y)
+
+	-- Ignore the player's own character so it can't be picked as a target
 	local raycastParams = RaycastParams.new()
-	raycastParams.FilterDescendantsInstances = {} -- We want to hit everything
-	raycastParams.FilterType = Enum.RaycastFilterType.Blacklist
+	raycastParams.FilterDescendantsInstances = LOCAL_PLAYER.Character and {LOCAL_PLAYER.Character} or {}
+	raycastParams.FilterType = Enum.RaycastFilterType.Exclude
 	raycastParams.IgnoreWater = true
 
 	local raycastResult = workspace:Raycast(ray.Origin, ray.Direction * 1000, raycastParams)
@@ -277,6 +307,22 @@ local function updateHover()
 		if hoveredObject and hoveredObject ~= selectedObject then
 			hoveredObject:highlight(COLOR_HOVERED)
 		end
+	end
+end
+
+-- Only re-checks hover when the mouse or camera has actually moved,
+-- instead of raycasting every single frame
+local function updateHover()
+	local mouseLocation = UserInputService:GetMouseLocation()
+	local cameraCFrame = currentCamera and currentCamera.CFrame or nil
+
+	local mouseMoved = lastMouseLocation == nil or mouseLocation ~= lastMouseLocation
+	local cameraMoved = cameraCFrame ~= lastCameraCFrame
+
+	if mouseMoved or cameraMoved then
+		lastMouseLocation = mouseLocation
+		lastCameraCFrame = cameraCFrame
+		refreshHover()
 	end
 end
 
@@ -387,8 +433,8 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
 	end
 end)
 
--- Update hovered object every frame to give real-time feedback
-RunService.RenderStepped:Connect(updateHover)
+-- Check hover state every frame
+RunService.Heartbeat:Connect(updateHover)
 
 -- Print control instructions on script load for user clarity
 print([[
