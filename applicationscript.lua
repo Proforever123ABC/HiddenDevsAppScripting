@@ -6,6 +6,7 @@ local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
 local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 -- Constants and Player References
 local LOCAL_PLAYER = Players.LocalPlayer
@@ -14,6 +15,10 @@ local LOCAL_PLAYER = Players.LocalPlayer
 local COLOR_SELECTED = Color3.fromRGB(0, 255, 0)    -- Green when selected
 local COLOR_HOVERED = Color3.fromRGB(255, 255, 0)   -- Yellow when hovered
 local COLOR_DEFAULT = Color3.fromRGB(200, 200, 200) -- Neutral grey
+
+-- RemoteEvent to tell the server to save or load the save slot.
+local remotesFolder = ReplicatedStorage:WaitForChild("Remotes")
+local saveLoadRemote = remotesFolder:WaitForChild("SaveLoadRequest")
 
 -- EditableObject class with metatable
 -- Encapsulates a part and provides transformation methods
@@ -268,6 +273,101 @@ local function duplicateSelectedObject()
 	selectObject(cloneObj)
 end
 
+-- Single slot save/load system
+
+-- Convert a single EditableObject into a table of values.
+-- CFrame:GetComponents() unpacks the CFrame of the object so the DataStore can take these values and when the save slot is loaded the object can be reconstructed.
+local function serializeObject(obj)
+	local inst = obj.instance
+	local px, py, pz, r00, r01, r02, r10, r11, r12, r20, r21, r22 = inst.CFrame:GetComponents()
+	return {
+		name = obj.name,
+		cframe = {px, py, pz, r00, r01, r02, r10, r11, r12, r20, r21, r22},
+		size = {inst.Size.X, inst.Size.Y, inst.Size.Z},
+		color = {inst.Color.R, inst.Color.G, inst.Color.B}
+	}
+end
+
+-- Puts the 12 numbers back together into a usable CFrame.
+local function deserializeCFrame(components)
+	return CFrame.new(
+		components[1], components[2], components[3],
+		components[4], components[5], components[6],
+		components[7], components[8], components[9],
+		components[10], components[11], components[12]
+	)
+end
+
+-- Loops through all the objects and serializes each one into a table
+local function serializeAllObjects()
+	local saveData = {}
+	for _, obj in ipairs(allObjects) do
+		table.insert(saveData, serializeObject(obj))
+	end
+	return saveData
+end
+
+-- Deletes everything that's currently placed and resets the object tables so it can load in fresh.
+local function clearAllObjects()
+	for _, obj in ipairs(allObjects) do
+		if obj.instance then
+			obj.instance:Destroy()
+		end
+	end
+	allObjects = {}
+	selectedObject = nil
+	hoveredObject = nil
+	updateInfoGui()
+end
+
+-- Clears all the objects that are already there then respawns everything using the saved data.
+local function deserializeAllObjects(saveData)
+	clearAllObjects()
+	for _, entry in ipairs(saveData) do
+		local part = Instance.new("Part")
+		part.Anchored = true
+		part.CFrame = deserializeCFrame(entry.cframe)
+		part.Size = Vector3.new(entry.size[1], entry.size[2], entry.size[3])
+		part.Color = Color3.new(entry.color[1], entry.color[2], entry.color[3])
+		part.Name = entry.name
+		part.Parent = getObjectsFolder()
+		local obj = EditableObject.new(part)
+		table.insert(allObjects, obj)
+		-- Makes sure the counter doesn't fall behind so new objects don't have a name that's already taken.
+		local loadedIndex = tonumber(entry.name:match("Obj_(%d+)"))
+		if loadedIndex and loadedIndex > objectCounter then
+			objectCounter = loadedIndex
+		end
+	end
+end
+
+-- Serializes everything in the scene and gives it to the server to save.
+local function saveToSlot()
+	local saveData = serializeAllObjects()
+	saveLoadRemote:FireServer("Save", saveData)
+	print("Save request sent to server for", #saveData, "object(s).")
+end
+
+-- Asks the server for the save slot.
+local function loadFromSlot()
+	saveLoadRemote:FireServer("Load")
+	print("Load request sent to server.")
+end
+
+-- Server gives the save slot's data and rebuilds everything
+saveLoadRemote.OnClientEvent:Connect(function(action, data)
+	if action ~= "Load" then return end
+
+	if not data then
+		-- Tell the player if there is nothing saved yet.
+		print("No save data found in slot.")
+		return
+	end
+
+	deserializeAllObjects(data)
+	print("Loaded", #data, "object(s) from slot.")
+end)
+
 -- Detects which EditableObject the mouse is currently over and manages hover state
 local lastMouseLocation = nil
 local lastCameraCFrame = nil
@@ -394,6 +494,18 @@ local function handleKeyInput(key)
 		return
 	end
 
+	-- Save all objects to the single save slot
+	if key == Enum.KeyCode.K then
+		saveToSlot()
+		return
+	end
+
+	-- Load all objects from the single save slot
+	if key == Enum.KeyCode.L then
+		loadFromSlot()
+		return
+	end
+
 	-- If no object is selected, no further input applies
 	if not selectedObject then return end
 
@@ -446,6 +558,8 @@ EditableObject Controls:
   U       - Undo last action
   Y       - Redo last undone action
   C       - Duplicate selected object
+  K       - Save all objects to the save slot
+  L       - Load all objects from the save slot
   W/A/S/D - Move selected object along XZ plane
   PageUp  - Move selected object up
   PageDown- Move selected object down
